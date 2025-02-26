@@ -1,2 +1,2 @@
 # short-URL
-Create a complete  short URL service in c++ 
+Create a short URL service in c++ 
