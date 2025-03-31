@@ -2,6 +2,7 @@
 
 #include "crow.h"
 #include "MySQLConnectionPool.hpp"
+#include "ThreadPool.hpp"
 #include <iostream>
 #include <string>
 #include <random>
@@ -14,6 +15,12 @@
 #include <mysql_connection.h>
 #include <cppconn/statement.h>
 #include <cppconn/prepared_statement.h>
+
+
+
+MySQLConnectionPool ReadOperationconnectionPool(10);
+MySQLConnectionPool WriteOperationconnectionPool(10);
+ThreadPool threadPool(10);
 
 
 // Random short key generator
@@ -31,8 +38,7 @@ std::string generateShortKey(int length = 6) {
 }
 
 
-MySQLConnectionPool ReadOperationconnectionPool(10);
-MySQLConnectionPool WriteOperationconnectionPool(3);
+
 
 std::future<std::string> asyncShortenURL(const std::string& originalUrl) {
     return std::async(std::launch::async, [originalUrl]() {
@@ -41,7 +47,7 @@ std::future<std::string> asyncShortenURL(const std::string& originalUrl) {
             std::string shortKey = generateShortKey();
 
             std::unique_ptr<sql::PreparedStatement> pstmt(conn->prepareStatement(
-                "INSERT INTO urls (original_url, short_key) VALUES (?, ?)"
+                "INSERT INTO urls (original_url, short_key ) VALUES (?, ?)"
             ));
             pstmt->setString(1, originalUrl);
             pstmt->setString(2, shortKey);
@@ -58,28 +64,49 @@ std::future<std::string> asyncShortenURL(const std::string& originalUrl) {
 }
 
 
-std::future<std::string> asyncOriginalUrl(const std::string& shortUrl){
-    return std::async(std::launch::async, [shortUrl](){
+std::future<std::string> asyncOriginalUrl(const std::string& shortUrl) {
+    return std::async(std::launch::async, [shortUrl]() {
         try {
             auto conn = ReadOperationconnectionPool.getConnection();
-            std::unique_ptr<sql::PreparedStatement> pstmt(conn->prepareStatement(
+
+            // Step 1: Get original URL
+            std::unique_ptr<sql::PreparedStatement> selectStmt(conn->prepareStatement(
                 "SELECT original_url FROM urls WHERE short_key = ?"
             ));
-            pstmt->setString(1, shortUrl);
-            auto result = std::unique_ptr<sql::ResultSet>(pstmt->executeQuery());
+            selectStmt->setString(1, shortUrl);
+            auto result = std::unique_ptr<sql::ResultSet>(selectStmt->executeQuery());
+
             if (result->next()) {
                 std::string originalUrl = result->getString("original_url");
+                threadPool.enqueue([shortUrl]() {
+                
+                        auto conn = WriteOperationconnectionPool.getConnection();
+                        
+                        // Step 2: Increment clicks directly in SQL
+                        std::unique_ptr<sql::PreparedStatement> updateStmt(conn->prepareStatement(
+                            "UPDATE urls SET clicks = clicks + 1 WHERE short_key = ?"
+                        ));
+                        updateStmt->setString(1, shortUrl);
+                        updateStmt->execute();
+
+                        std::cout << "Clicks incremented for " << shortUrl << std::endl;
+                        WriteOperationconnectionPool.releaseConnection(std::move(conn));
+               
+                });
+                
                 ReadOperationconnectionPool.releaseConnection(std::move(conn));
                 return originalUrl;
             } else {
                 ReadOperationconnectionPool.releaseConnection(std::move(conn));
                 return std::string("URL not found");
             }
+
         } catch (sql::SQLException& e) {
             return std::string("Error: ") + e.what();
         }
     });
 }
+
 
 
 
@@ -114,6 +141,27 @@ int main() {
 
 
     CROW_ROUTE(app, "/<string>")([](const crow::request& req, crow::response& res, std::string shortKey) {
+        try {
+            std::cout<<shortKey<<std::endl;
+            auto result = asyncOriginalUrl(shortKey).get();
+            std::cout<< result <<std::endl;
+            if (result != "URL not found") {
+                res.code = 301;
+                res.set_header("Location", result);
+            } else {
+                res.code = 404;
+                res.write("URL not found");
+            }
+
+        } catch (sql::SQLException& e) {
+            res.code = 500;
+            res.write("Error: " + std::string(e.what()));
+        }
+        res.end();
+    });
+
+
+    CROW_ROUTE(app, "/stats/<string>")([](const crow::request& req, crow::response& res, std::string shortKey) {
         try {
             std::cout<<shortKey<<std::endl;
             auto result = asyncOriginalUrl(shortKey).get();

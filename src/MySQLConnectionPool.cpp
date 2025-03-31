@@ -9,6 +9,8 @@ MySQLConnectionPool::MySQLConnectionPool(int poolSize) : maxConnections(poolSize
         auto conn = std::unique_ptr<sql::Connection>(
             driver->connect("tcp://127.0.0.1:3306", "cpp_user", "Hosam$$2018")
         );
+        bool reconnect = true;
+        conn->setClientOption("OPT_RECONNECT", &reconnect);
         conn->setSchema("url_shortener");
         pool.push(std::move(conn));
     }
@@ -20,6 +22,7 @@ std::unique_ptr<sql::Connection> MySQLConnectionPool::getConnection() {
     condition.wait(lock, [this] { return !pool.empty(); });
     auto conn = std::move(pool.front());
     pool.pop();
+    if (!conn) throw std::runtime_error("No DB connection");
     return conn;
 }
 

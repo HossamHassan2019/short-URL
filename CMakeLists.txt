@@ -17,7 +17,9 @@ message(STATUS "Using MySQL Connector/C++ library: ${MYSQL_CPP_LIB}")
 # Add your source file here
 add_executable(shortenUrl src/main.cpp
                           src/MySQLConnectionPool.cpp
-                          src/MySQLConnectionPool.hpp) 
+                          src/MySQLConnectionPool.hpp
+                          src/ThreadPool.cpp
+                          src/ThreadPool.hpp) 
 
 # Include cppconn headers
 include_directories(external/crow/include)
