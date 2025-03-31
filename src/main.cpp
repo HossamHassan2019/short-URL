@@ -23,7 +23,12 @@ MySQLConnectionPool WriteOperationconnectionPool(10);
 ThreadPool threadPool(10);
 
 
-// Random short key generator
+/**
+ * @brief Generates a random alphanumeric short key of given length.
+ * 
+ * @param length Length of the short key (default = 6)
+ * @return A random short key string.
+ */
 std::string generateShortKey(int length = 6) {
     const std::string chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     std::random_device rd;
@@ -39,7 +44,12 @@ std::string generateShortKey(int length = 6) {
 
 
 
-
+/**
+ * @brief Asynchronously inserts a new URL into the database and returns a short key.
+ * 
+ * @param originalUrl The original long URL to be shortened.
+ * @return A future holding the generated short key or an error message.
+ */
 std::future<std::string> asyncShortenURL(const std::string& originalUrl) {
     return std::async(std::launch::async, [originalUrl]() {
         try {
@@ -67,7 +77,13 @@ std::future<std::string> asyncShortenURL(const std::string& originalUrl) {
 
 
 
-
+/**
+ * @brief Asynchronously retrieves the original URL from a short key.
+ *        Also enqueues a task to increment the click count.
+ * 
+ * @param shortUrl The short key.
+ * @return A future holding the original URL or "URL not found"/error message.
+ */
 std::future<std::string> asyncOriginalUrl(const std::string& shortUrl) {
     return std::async(std::launch::async, [shortUrl]() {
         try {
@@ -111,7 +127,12 @@ std::future<std::string> asyncOriginalUrl(const std::string& shortUrl) {
     });
 }
 
-
+/**
+ * @brief Asynchronously retrieves click statistics for a given short URL.
+ * 
+ * @param shortUrl The short key.
+ * @return A future holding the number of clicks or -1 on error/not found.
+ */
 std::future<int> asyncStats(const std::string& shortUrl) {
     return std::async(std::launch::async, [shortUrl]() {
         try {
@@ -142,7 +163,12 @@ std::future<int> asyncStats(const std::string& shortUrl) {
 
 
 
-
+/**
+ * @brief Validates a URL string using regex.
+ * 
+ * @param url The input URL to validate.
+ * @return true if valid, false otherwise.
+ */
 bool isValidUrl(const std::string& url) {
     const std::regex pattern(R"(^(https?|ftp)://[^\s/$.?#].[^\s]*$)");
     return std::regex_match(url, pattern);
@@ -152,7 +178,7 @@ bool isValidUrl(const std::string& url) {
 
 int main() {
     crow::SimpleApp app;
-
+    // POST /shorten: Accepts a JSON body and returns a shortened URL key
     CROW_ROUTE(app, "/shorten").methods("POST"_method)([](const crow::request& req, crow::response& res) {
         auto body = crow::json::load(req.body);
         
@@ -171,7 +197,7 @@ int main() {
         res.end();
     });
 
-
+    // GET /<shortKey>: Redirects to the original URL or returns 404 if not found
     CROW_ROUTE(app, "/<string>")([](const crow::request& req, crow::response& res, std::string shortKey) {
         try {
             
@@ -192,7 +218,7 @@ int main() {
         res.end();
     });
 
-
+    // GET /stats/<shortKey>: Returns click stats for a short URL
     CROW_ROUTE(app, "/stats/<string>")([](const crow::request& req, crow::response& res, std::string shortKey) {
         try {
             
