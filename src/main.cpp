@@ -64,6 +64,10 @@ std::future<std::string> asyncShortenURL(const std::string& originalUrl) {
 }
 
 
+
+
+
+
 std::future<std::string> asyncOriginalUrl(const std::string& shortUrl) {
     return std::async(std::launch::async, [shortUrl]() {
         try {
@@ -108,6 +112,34 @@ std::future<std::string> asyncOriginalUrl(const std::string& shortUrl) {
 }
 
 
+std::future<int> asyncStats(const std::string& shortUrl) {
+    return std::async(std::launch::async, [shortUrl]() {
+        try {
+            auto conn = ReadOperationconnectionPool.getConnection();
+
+            // Step 1: Get original URL
+            std::unique_ptr<sql::PreparedStatement> selectStmt(conn->prepareStatement(
+                "SELECT clicks FROM urls WHERE short_key = ?"
+            ));
+            selectStmt->setString(1, shortUrl);
+            auto result = std::unique_ptr<sql::ResultSet>(selectStmt->executeQuery());
+
+            if (result->next()) {
+                int clicks = result->getInt("clicks");
+                ReadOperationconnectionPool.releaseConnection(std::move(conn));
+                return clicks;
+            } else {
+                ReadOperationconnectionPool.releaseConnection(std::move(conn));
+                return -1;
+            }
+
+        } catch (sql::SQLException& e) {
+            return -1;
+        }
+    });
+}
+
+
 
 
 
@@ -142,7 +174,7 @@ int main() {
 
     CROW_ROUTE(app, "/<string>")([](const crow::request& req, crow::response& res, std::string shortKey) {
         try {
-            std::cout<<shortKey<<std::endl;
+            
             auto result = asyncOriginalUrl(shortKey).get();
             std::cout<< result <<std::endl;
             if (result != "URL not found") {
@@ -163,11 +195,11 @@ int main() {
 
     CROW_ROUTE(app, "/stats/<string>")([](const crow::request& req, crow::response& res, std::string shortKey) {
         try {
-            std::cout<<shortKey<<std::endl;
-            auto result = asyncOriginalUrl(shortKey).get();
-            if (result != "URL not found") {
+            
+            auto result = asyncStats(shortKey).get();
+            if (result != -1) {
                 res.code = 301;
-                res.set_header("Location", result);
+                res.write(std::to_string(result));
             } else {
                 res.code = 404;
                 res.write("URL not found");
