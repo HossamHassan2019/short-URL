@@ -3,6 +3,7 @@
 #include "crow.h"
 #include "MySQLConnectionPool.hpp"
 #include "ThreadPool.hpp"
+#include "shortURL.hpp"
 #include <iostream>
 #include <string>
 #include <random>
@@ -11,10 +12,10 @@
 #include <condition_variable>
 #include <future>
 #include <regex>
-#include <mysql_driver.h>
-#include <mysql_connection.h>
-#include <cppconn/statement.h>
-#include <cppconn/prepared_statement.h>
+
+
+
+
 
 
 
@@ -52,24 +53,17 @@ std::string generateShortKey(int length = 6) {
  */
 std::future<std::string> asyncShortenURL(const std::string& originalUrl) {
     return std::async(std::launch::async, [originalUrl]() {
-        try {
-            auto conn = WriteOperationconnectionPool.getConnection();
+   
             std::string shortKey = generateShortKey();
-
-            std::unique_ptr<sql::PreparedStatement> pstmt(conn->prepareStatement(
-                "INSERT INTO urls (original_url, short_key ) VALUES (?, ?)"
-            ));
-            pstmt->setString(1, originalUrl);
-            pstmt->setString(2, shortKey);
-            pstmt->execute();
-
-            WriteOperationconnectionPool.releaseConnection(std::move(conn));
+            ShortURL shortUrl(shortKey, originalUrl);
+            auto user = WriteOperationconnectionPool.getConnection();
+            user->insert(shortUrl);
+            
+            WriteOperationconnectionPool.releaseConnection(std::move(user));
 
             return  shortKey;
 
-        } catch (sql::SQLException& e) {
-            return std::string("Error: ") + e.what();
-        }
+       
     });
 }
 
@@ -86,44 +80,24 @@ std::future<std::string> asyncShortenURL(const std::string& originalUrl) {
  */
 std::future<std::string> asyncOriginalUrl(const std::string& shortUrl) {
     return std::async(std::launch::async, [shortUrl]() {
-        try {
-            auto conn = ReadOperationconnectionPool.getConnection();
-
-            // Step 1: Get original URL
-            std::unique_ptr<sql::PreparedStatement> selectStmt(conn->prepareStatement(
-                "SELECT original_url FROM urls WHERE short_key = ?"
-            ));
-            selectStmt->setString(1, shortUrl);
-            auto result = std::unique_ptr<sql::ResultSet>(selectStmt->executeQuery());
-
-            if (result->next()) {
-                std::string originalUrl = result->getString("original_url");
-                threadPool.enqueue([shortUrl]() {
-                
-                        auto conn = WriteOperationconnectionPool.getConnection();
-                        
-                        // Step 2: Increment clicks directly in SQL
-                        std::unique_ptr<sql::PreparedStatement> updateStmt(conn->prepareStatement(
-                            "UPDATE urls SET clicks = clicks + 1 WHERE short_key = ?"
-                        ));
-                        updateStmt->setString(1, shortUrl);
-                        updateStmt->execute();
-
-                        std::cout << "Clicks incremented for " << shortUrl << std::endl;
-                        WriteOperationconnectionPool.releaseConnection(std::move(conn));
-               
+       
+            auto readUser = ReadOperationconnectionPool.getConnection();
+            auto shortURLObj =readUser->readOriginalURL(shortUrl);
+            if(shortURLObj){
+                ReadOperationconnectionPool.releaseConnection(std::move(readUser));
+                threadPool.enqueue([shortURLObj](){
+                    auto writeUser = WriteOperationconnectionPool.getConnection();
+                    writeUser->incrementCounter(shortURLObj.value());
+                    WriteOperationconnectionPool.releaseConnection(std::move(writeUser));
                 });
-                
-                ReadOperationconnectionPool.releaseConnection(std::move(conn));
-                return originalUrl;
-            } else {
-                ReadOperationconnectionPool.releaseConnection(std::move(conn));
+                return shortURLObj->getOriginalURL();
+
+            }else{
+                ReadOperationconnectionPool.releaseConnection(std::move(readUser));
                 return std::string("URL not found");
             }
 
-        } catch (sql::SQLException& e) {
-            return std::string("Error: ") + e.what();
-        }
+            
     });
 }
 
@@ -135,28 +109,19 @@ std::future<std::string> asyncOriginalUrl(const std::string& shortUrl) {
  */
 std::future<int> asyncStats(const std::string& shortUrl) {
     return std::async(std::launch::async, [shortUrl]() {
-        try {
-            auto conn = ReadOperationconnectionPool.getConnection();
-
-            // Step 1: Get original URL
-            std::unique_ptr<sql::PreparedStatement> selectStmt(conn->prepareStatement(
-                "SELECT clicks FROM urls WHERE short_key = ?"
-            ));
-            selectStmt->setString(1, shortUrl);
-            auto result = std::unique_ptr<sql::ResultSet>(selectStmt->executeQuery());
-
-            if (result->next()) {
-                int clicks = result->getInt("clicks");
-                ReadOperationconnectionPool.releaseConnection(std::move(conn));
-                return clicks;
-            } else {
-                ReadOperationconnectionPool.releaseConnection(std::move(conn));
-                return -1;
+        
+            auto readUser = ReadOperationconnectionPool.getConnection();
+            auto shortUrlObj = readUser->readCounter(shortUrl);
+            if(shortUrlObj){
+                ReadOperationconnectionPool.releaseConnection(std::move(readUser));
+                return shortUrlObj->getCounter();
             }
+            else{
+                ReadOperationconnectionPool.releaseConnection(std::move(readUser));
+                return -1;
 
-        } catch (sql::SQLException& e) {
-            return -1;
-        }
+            }
+            
     });
 }
 
