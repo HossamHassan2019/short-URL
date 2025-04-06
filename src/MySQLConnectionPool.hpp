@@ -9,21 +9,21 @@
 #include <condition_variable>
 #include <mysql_driver.h>
 #include <mysql_connection.h>
-
+#include "MysqlUser.hpp"
 
 
 class MySQLConnectionPool {
     private:
-        std::queue<std::unique_ptr<sql::Connection>> pool;
+        std::queue<std::unique_ptr<MySqlUser>> pool;
         std::mutex poolMutex;
         std::condition_variable condition;
         int maxConnections;
-        sql::mysql::MySQL_Driver* driver;
+        
     
     public:
         MySQLConnectionPool(int );
-        std::unique_ptr<sql::Connection> getConnection();
-        void releaseConnection(std::unique_ptr<sql::Connection>);
+        std::unique_ptr<MySqlUser> getConnection();
+        void releaseConnection(std::unique_ptr<MySqlUser>);
     };
 
 

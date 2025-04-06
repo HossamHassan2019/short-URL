@@ -19,7 +19,13 @@ add_executable(shortenUrl src/main.cpp
                           src/MySQLConnectionPool.cpp
                           src/MySQLConnectionPool.hpp
                           src/ThreadPool.cpp
-                          src/ThreadPool.hpp) 
+                          src/ThreadPool.hpp
+                          src/utils.cpp
+                          src/utils.hpp
+                          src/UserDAO.hpp
+                          src/MysqlUser.cpp
+                          src/MysqlUser.hpp
+                          src/shortURL.hpp) 
 
 # Include cppconn headers
 include_directories(external/crow/include)
