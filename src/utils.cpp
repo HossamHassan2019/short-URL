@@ -9,3 +9,15 @@ std::optional<std::string> getEnv(const std::string& envKey){
 
 
 
+/**
+ * @brief Validates a URL string using regex.
+ * 
+ * @param url The input URL to validate.
+ * @return true if valid, false otherwise.
+ */
+bool isValidUrl(const std::string& url) {
+    const std::regex pattern(R"(^(https?|ftp)://[^\s/$.?#].[^\s]*$)");
+    return std::regex_match(url, pattern);
+}
+
+

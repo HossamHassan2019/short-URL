@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 project(MySQLCppConnectorExample LANGUAGES CXX)
-
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -25,7 +25,9 @@ add_executable(shortenUrl src/main.cpp
                           src/UserDAO.hpp
                           src/MysqlUser.cpp
                           src/MysqlUser.hpp
-                          src/shortURL.hpp) 
+                          src/shortURL.hpp
+                          src/cache.cpp
+                          src/cache.hpp) 
 
 # Include cppconn headers
 include_directories(external/crow/include)
