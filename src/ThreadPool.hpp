@@ -11,6 +11,8 @@
 #include <atomic>
 #include <vector>
 
+
+
 class ThreadPool {
     private:
         std::vector<std::thread> workers;
@@ -22,8 +24,14 @@ class ThreadPool {
     
     public:
         ThreadPool(int maxThreads);
-    
-        void enqueue(std::function<void()> task);
+        template<typename F>
+        void enqueue(F&& f) {
+            {
+                std::lock_guard<std::mutex> lock(queueMutex);
+                tasks.emplace(std::forward<F>(f));
+            }
+            condition.notify_one();
+        }
            
         ~ThreadPool();
     };

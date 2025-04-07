@@ -35,21 +35,7 @@ ThreadPool::ThreadPool(int maxThreads) : stop(false) {
         });
     }
 }
-/**
- * @brief        Adds a task to the thread pool's task queue.
- *
- * @details      The task is stored and will be picked up by the next available
- *               worker thread.
- *
- * @param[in]    task    A callable (e.g., lambda or function) to be executed by the thread pool.
- */
-void ThreadPool::enqueue(std::function<void()> task) {
-    {
-        std::lock_guard<std::mutex> lock(queueMutex);
-        tasks.push(std::move(task));
-    }
-    condition.notify_one();
-}
+
 
 
 /**

@@ -4,24 +4,22 @@
 #include "MySQLConnectionPool.hpp"
 #include "ThreadPool.hpp"
 #include "shortURL.hpp"
+#include "cache.hpp"
+#include "utils.hpp"
 #include <iostream>
 #include <string>
 #include <random>
 #include <queue>
 #include <mutex>
 #include <condition_variable>
-#include <future>
-#include <regex>
-
-
-
-
 
 
 
 MySQLConnectionPool ReadOperationconnectionPool(10);
 MySQLConnectionPool WriteOperationconnectionPool(10);
 ThreadPool threadPool(10);
+
+
 
 
 /**
@@ -45,26 +43,26 @@ std::string generateShortKey(int length = 6) {
 
 
 
+
 /**
- * @brief Asynchronously inserts a new URL into the database and returns a short key.
+ * @brief Generates a short key, saves the URL mapping to DB and cache.
  * 
- * @param originalUrl The original long URL to be shortened.
- * @return A future holding the generated short key or an error message.
+ * @param originalUrl The original long URL.
+ * @return The generated short key string.
  */
-std::future<std::string> asyncShortenURL(const std::string& originalUrl) {
-    return std::async(std::launch::async, [originalUrl]() {
-   
-            std::string shortKey = generateShortKey();
-            ShortURL shortUrl(shortKey, originalUrl);
-            auto user = WriteOperationconnectionPool.getConnection();
-            user->insert(shortUrl);
-            
-            WriteOperationconnectionPool.releaseConnection(std::move(user));
+std::string writeUrl(const std::string& originalUrl){
+    std::string shortKey = generateShortKey();
+    Cache& cache = Cache::getInstance();
+    
+    ShortURL shortUrl(shortKey, originalUrl);
+    auto user = WriteOperationconnectionPool.getConnection();
+    user->insert(shortUrl);
+    
+    WriteOperationconnectionPool.releaseConnection(std::move(user));
+    cache.insert(ShortURL(shortKey,originalUrl));
 
-            return  shortKey;
+    return  shortKey;
 
-       
-    });
 }
 
 
@@ -72,44 +70,54 @@ std::future<std::string> asyncShortenURL(const std::string& originalUrl) {
 
 
 /**
- * @brief Asynchronously retrieves the original URL from a short key.
- *        Also enqueues a task to increment the click count.
+ * @brief Fetches the original URL using the short key.
+ *        First checks the cache, then DB if needed.
+ *        Also asynchronously increments the click counter.
  * 
- * @param shortUrl The short key.
- * @return A future holding the original URL or "URL not found"/error message.
+ * @param shortUrl The short key string.
+ * @return Optional original URL. std::nullopt if not found.
  */
-std::future<std::string> asyncOriginalUrl(const std::string& shortUrl) {
-    return std::async(std::launch::async, [shortUrl]() {
-       
-            auto readUser = ReadOperationconnectionPool.getConnection();
-            auto shortURLObj =readUser->readOriginalURL(shortUrl);
-            if(shortURLObj){
-                ReadOperationconnectionPool.releaseConnection(std::move(readUser));
-                threadPool.enqueue([shortURLObj](){
+std::optional<std::string> readUrl(const std::string& shortUrl) {
+   
+            Cache& cache = Cache::getInstance();
+            auto val = cache.readOriginalURL(shortUrl);
+            if(val) {
+                threadPool.enqueue([val](){
                     auto writeUser = WriteOperationconnectionPool.getConnection();
-                    writeUser->incrementCounter(shortURLObj.value());
+                    auto shortURlObj = ShortURL(val.value().getShortURL(), val.value().getOriginalURL());
+                    writeUser->incrementCounter(shortURlObj);
                     WriteOperationconnectionPool.releaseConnection(std::move(writeUser));
                 });
-                return shortURLObj->getOriginalURL();
-
-            }else{
-                ReadOperationconnectionPool.releaseConnection(std::move(readUser));
-                return std::string("URL not found");
+                cache.increment(shortUrl);
+                return val.value().getOriginalURL();
             }
+                auto readUser = ReadOperationconnectionPool.getConnection();
+                auto shortURLObj =readUser->readOriginalURL(shortUrl);
+                if(shortURLObj){
+                    ReadOperationconnectionPool.releaseConnection(std::move(readUser));
+                    threadPool.enqueue([shortURLObj](){
+                        auto writeUser = WriteOperationconnectionPool.getConnection();
+                        writeUser->incrementCounter(shortURLObj.value());
+                        WriteOperationconnectionPool.releaseConnection(std::move(writeUser));
+                    });
+                    return shortURLObj->getOriginalURL();
 
-            
-    });
+                }else{
+                    ReadOperationconnectionPool.releaseConnection(std::move(readUser));
+                    return std::nullopt;
+                }
 }
 
+
+
+
 /**
- * @brief Asynchronously retrieves click statistics for a given short URL.
+ * @brief Gets the click count for a short URL.
  * 
  * @param shortUrl The short key.
- * @return A future holding the number of clicks or -1 on error/not found.
+ * @return Click count if found, otherwise -1.
  */
-std::future<int> asyncStats(const std::string& shortUrl) {
-    return std::async(std::launch::async, [shortUrl]() {
-        
+int getStats(const std::string& shortUrl){
             auto readUser = ReadOperationconnectionPool.getConnection();
             auto shortUrlObj = readUser->readCounter(shortUrl);
             if(shortUrlObj){
@@ -121,23 +129,9 @@ std::future<int> asyncStats(const std::string& shortUrl) {
                 return -1;
 
             }
-            
-    });
 }
 
 
-
-
-/**
- * @brief Validates a URL string using regex.
- * 
- * @param url The input URL to validate.
- * @return true if valid, false otherwise.
- */
-bool isValidUrl(const std::string& url) {
-    const std::regex pattern(R"(^(https?|ftp)://[^\s/$.?#].[^\s]*$)");
-    return std::regex_match(url, pattern);
-}
 
 
 
@@ -154,9 +148,7 @@ int main() {
             res.end();
             return;
         }
-        auto futureResult = asyncShortenURL(originalUrl);
-        std::string result = futureResult.get();
-
+        std::string result  = writeUrl(originalUrl);
         res.set_header("Content-Type", "text/plain");
         res.write(result);
         res.end();
@@ -164,30 +156,25 @@ int main() {
 
     // GET /<shortKey>: Redirects to the original URL or returns 404 if not found
     CROW_ROUTE(app, "/<string>")([](const crow::request& req, crow::response& res, std::string shortKey) {
-        try {
-            
-            auto result = asyncOriginalUrl(shortKey).get();
-            std::cout<< result <<std::endl;
-            if (result != "URL not found") {
+        
+            auto result = readUrl(shortKey);
+            if (result ) {
+                std::cout<<result.value()<<std::endl;
                 res.code = 301;
-                res.set_header("Location", result);
+                res.set_header("Location", result.value());
             } else {
                 res.code = 404;
-                res.write("URL not found");
+                res.write("URL not found"); 
             }
+            res.end();
 
-        } catch (sql::SQLException& e) {
-            res.code = 500;
-            res.write("Error: " + std::string(e.what()));
-        }
-        res.end();
     });
 
     // GET /stats/<shortKey>: Returns click stats for a short URL
     CROW_ROUTE(app, "/stats/<string>")([](const crow::request& req, crow::response& res, std::string shortKey) {
         try {
             
-            auto result = asyncStats(shortKey).get();
+            auto result = getStats(shortKey);
             if (result != -1) {
                 res.code = 301;
                 res.write(std::to_string(result));
@@ -205,5 +192,6 @@ int main() {
 
     std::cout << "Starting server on port 8080...\n";
     app.port(8080).multithreaded().run();
+
     return 0;
 }
