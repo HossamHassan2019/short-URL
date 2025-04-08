@@ -35,3 +35,13 @@ target_include_directories(shortenUrl PRIVATE ${MYSQL_CPP_INCLUDE_DIR})
 
 # Link the MySQL C++ connector library
 target_link_libraries(shortenUrl PRIVATE ${MYSQL_CPP_LIB})
+
+# Find and include Google Test
+find_package(GTest REQUIRED)
+include_directories(${GTEST_INCLUDE_DIRS})
+
+# Add test executable
+add_executable(unit_tests test/test_MySQLConnectionPool.cpp)
+
+# Link test executable with Google Test and your main library
+target_link_libraries(unit_tests PRIVATE ${GTEST_LIBRARIES} pthread ${MYSQL_CPP_LIB})
